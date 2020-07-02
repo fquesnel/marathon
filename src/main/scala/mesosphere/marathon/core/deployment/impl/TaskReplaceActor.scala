@@ -223,7 +223,7 @@ object TaskReplaceActor extends StrictLogging {
   )
 
   /** Encapsulates the logic how to get a Restart going */
-  private[impl] case class RestartStrategy(nrToKillImmediately: Int, nrToStartImmediately: Int)
+  private[impl] case class RestartStrategy(nrToKillImmediately: Int, nrToStartImmediately: Int, maxCapacity: Int)
 
   private[impl] def computeRestartStrategy(runSpec: RunSpec, new_running: Int, old_running: Int, new_failing: Int, old_failing: Int): RestartStrategy = {
     val consideredHealthyInstancesCount = new_running + old_running
@@ -277,7 +277,7 @@ object TaskReplaceActor extends StrictLogging {
     val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning)
     val instancesNotStartedYet = math.max(0, runSpec.instances - new_running - new_failing)
     val nrToStartImmediately = math.min(instancesNotStartedYet, leftCapacity)
-    RestartStrategy(nrToKillImmediately = nrToKillImmediately, nrToStartImmediately = nrToStartImmediately)
+    RestartStrategy(nrToKillImmediately = nrToKillImmediately, nrToStartImmediately = nrToStartImmediately, maxCapacity = maxCapacity)
   }
 }
 
