@@ -77,10 +77,10 @@ class TaskReplaceActor(
         return false
       }
     } else if (instance.hasConfiguredHealthChecks && !i_health.isDefined) {
-      logger.info(s"Checking ${instance.instanceId}: has healcheck and is UNKNOWN")
+      logger.info(s"Checking ${instance.instanceId}: has healhcheck and is UNKNOWN")
       return false
     } else { // Don't have healthchecks
-      logger.info(s"Checking ${instance.instanceId}: has now HC")
+      logger.info(s"Checking ${instance.instanceId}: has no healthchecks")
       if (instance.state.goal == Goal.Running) return true
       else return false
     }
@@ -98,7 +98,7 @@ class TaskReplaceActor(
   }
 
   def step(health: Map[Instance.Id, Seq[Health]]): Unit = {
-    logger.info(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---yy")
+    logger.info(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
     val current_instances = instanceTracker.specInstancesSync(pathId)
     var new_running = 0
     var old_running = 0
