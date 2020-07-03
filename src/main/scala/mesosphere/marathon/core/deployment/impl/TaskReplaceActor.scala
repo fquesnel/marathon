@@ -70,17 +70,17 @@ class TaskReplaceActor(
     val i_health = healths.find(_._1 == instance.instanceId)
     if (instance.hasConfiguredHealthChecks && i_health.isDefined) { // Has healthchecks
       if (_isHealthy(i_health.get._2) == true) {
-        logger.info(s"Checking ${instance.instanceId}: has healcheck and is healthy")
+        logger.debug(s"Checking ${instance.instanceId}: has healcheck and is healthy")
         return true
       } else {
-        logger.info(s"Checking ${instance.instanceId}: has healcheck and is NOT healthy")
+        logger.debug(s"Checking ${instance.instanceId}: has healcheck and is NOT healthy")
         return false
       }
     } else if (instance.hasConfiguredHealthChecks && !i_health.isDefined) {
-      logger.info(s"Checking ${instance.instanceId}: has healhcheck and is UNKNOWN")
+      logger.debug(s"Checking ${instance.instanceId}: has healhcheck and is UNKNOWN")
       return false
     } else { // Don't have healthchecks
-      logger.info(s"Checking ${instance.instanceId}: has no healthchecks")
+      logger.debug(s"Checking ${instance.instanceId}: has no healthchecks")
       if (instance.state.goal == Goal.Running) return true
       else return false
     }
@@ -98,7 +98,7 @@ class TaskReplaceActor(
   }
 
   def step(health: Map[Instance.Id, Seq[Health]]): Unit = {
-    logger.info(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
+    logger.debug(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
     val current_instances = instanceTracker.specInstancesSync(pathId)
     var new_running = 0
     var old_running = 0
@@ -114,15 +114,11 @@ class TaskReplaceActor(
       }
     }
 
-    logger.info(s"=> New running: ${new_running}")
-    logger.info(s"=> New failing: ${new_failing}")
-    logger.info(s"=> Old running: ${old_running}")
-    logger.info(s"=> Old failing: ${old_failing}")
+    logger.info(s"Found health status for ${pathId}: new_running=>${new_running} old_running=>${old_running} new_failing=>${new_failing} old_failing=>${old_failing}")
 
     val ignitionStrategy = computeRestartStrategy(runSpec, new_running, old_running, new_failing, old_failing)
 
-    logger.info(s"=> To kill: ${ignitionStrategy.nrToKillImmediately}")
-    logger.info(s"=> To start: ${ignitionStrategy.nrToStartImmediately}")
+    logger.info(s"restartStrategy gives : to_kill=>${ignitionStrategy.nrToKillImmediately} to_start=>${ignitionStrategy.nrToStartImmediately}")
 
     // kill old instances to free some capacity
     for (_ <- 0 until ignitionStrategy.nrToKillImmediately) killNextOldInstance()
@@ -130,7 +126,9 @@ class TaskReplaceActor(
     // start new instances, if possible
     launchInstances(ignitionStrategy.nrToStartImmediately).pipeTo(self)
 
-    // Check if we reached the end of the deployment
+    // Check if we reached the end of the deployment, meaning
+    // that old instances (failing or running) are removed,
+    // and new instances are all running.
     checkFinished(new_running, old_running + old_failing)
   }
 
@@ -162,7 +160,6 @@ class TaskReplaceActor(
       logger.info(s"Deployment $deploymentId: Restarting app $pathId: queuing $instancesToStartNow new instances.")
       launchQueue.add(runSpec, instancesToStartNow)
     } else {
-      logger.info(s"Deployment $deploymentId: Restarting app $pathId. No need to start new instances right now.")
       Future.successful(Done)
     }
   }
@@ -190,15 +187,15 @@ class TaskReplaceActor(
     }
   }
 
-  def checkFinished(nr_new: Int, nr_old: Int): Unit = {
-    if (nr_new == runSpec.instances && nr_old == 0) {
+  def checkFinished(newInstances: Int, oldInstances: Int): Unit = {
+    if (newInstances == runSpec.instances && oldInstances == 0) {
       logger.info(s"Deployment $deploymentId: All new instances for $pathId are ready and all old instances have been killed")
       promise.trySuccess(())
       context.stop(self)
     } else {
       logger.info(s"Deployment $deploymentId: For run spec: [${runSpec.id}] there are " +
-        s"[${nr_new}] ready new instances and " +
-        s"[${nr_old}] old instances. " +
+        s"[${newInstances}] ready new instances and " +
+        s"[${oldInstances}] old instances. " +
         s"Target count is ${runSpec.instances}.")
     }
   }
