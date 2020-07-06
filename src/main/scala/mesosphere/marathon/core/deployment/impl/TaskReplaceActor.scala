@@ -35,19 +35,6 @@ class TaskReplaceActor(
   def deploymentId = status.plan.id
   def pathId = runSpec.id
 
-  // instance to kill sorted by decreasing order of priority
-  // we always prefer to kill unhealthy tasks first
-  private[this] val toKillOrdered = instanceTracker.specInstancesSync(runSpec.id, readAfterWrite = true)
-    .partition(_.runSpecVersion == runSpec.version)._2.sortWith((i1, i2) => {
-      (i1.consideredHealthy, i2.consideredHealthy) match {
-        case (_, false) => false
-        case _ => true
-      }
-    })
-
-  // All instances to kill queued up
-  private[this] val toKill: mutable.Queue[Instance.Id] = toKillOrdered.map(_.instanceId).to[mutable.Queue]
-
   private[this] var tick: Cancellable = null
 
   @SuppressWarnings(Array("all")) // async/await
@@ -99,17 +86,15 @@ class TaskReplaceActor(
 
   def step(health: Map[Instance.Id, Seq[Health]]): Unit = {
     logger.debug(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
-    val current_instances = instanceTracker.specInstancesSync(pathId)
-    val state = new TransitionState()
-    for (i <- current_instances) {
-      if (i.runSpecVersion == runSpec.version) { // New version
-        if (isHealthy(i, health)) state.newInstancesRunning += 1
-        else state.newInstancesFailing += 1
-      } else { // Old instance
-        if (isHealthy(i, health)) state.oldInstancesRunning += 1
-        else state.oldInstancesFailing += 1
-      }
-    }
+    val current_instances = instanceTracker.specInstancesSync(pathId).partition(_.runSpecVersion == runSpec.version)
+
+    val new_instances = current_instances._1.partition(isHealthy(_, health))
+    val old_instances = current_instances._2.partition(isHealthy(_, health))
+
+    val toKill = old_instances._2.to[mutable.Queue]
+    toKill ++= old_instances._1
+
+    val state = new TransitionState(new_instances._1.size, new_instances._2.size, old_instances._1.size, old_instances._2.size)
 
     logger.info(s"Found health status for ${pathId}: new_running=>${state.newInstancesRunning} old_running=>${state.oldInstancesRunning} new_failing=>${state.newInstancesFailing} old_failing=>${state.oldInstancesFailing}")
 
@@ -118,7 +103,7 @@ class TaskReplaceActor(
     logger.info(s"restartStrategy gives : to_kill=>${ignitionStrategy.nrToKillImmediately} to_start=>${ignitionStrategy.nrToStartImmediately}")
 
     // kill old instances to free some capacity
-    for (_ <- 0 until ignitionStrategy.nrToKillImmediately) killNextOldInstance()
+    for (_ <- 0 until ignitionStrategy.nrToKillImmediately) killNextOldInstance(toKill)
 
     // start new instances, if possible
     launchInstances(ignitionStrategy.nrToStartImmediately).pipeTo(self)
@@ -162,21 +147,15 @@ class TaskReplaceActor(
   }
 
   @SuppressWarnings(Array("all")) // async/await
-  def killNextOldInstance(maybeNewInstanceId: Option[Instance.Id] = None): Unit = {
+  def killNextOldInstance(toKill: mutable.Queue[Instance]): Unit = {
     if (toKill.nonEmpty) {
-      val dequeued = toKill.dequeue()
+      val dequeued = toKill.dequeue().instanceId
       async {
         await(instanceTracker.get(dequeued)) match {
           case None =>
             logger.warn(s"Deployment $deploymentId: Was about to kill instance $dequeued but it did not exist in the instance tracker anymore.")
           case Some(nextOldInstance) =>
-            maybeNewInstanceId match {
-              case Some(newInstanceId: Instance.Id) =>
-                logger.info(s"Deployment $deploymentId: Killing old ${nextOldInstance.instanceId} because $newInstanceId became reachable")
-              case _ =>
-                logger.info(s"Deployment $deploymentId: Killing old ${nextOldInstance.instanceId}")
-            }
-
+            logger.info(s"Deployment $deploymentId: Killing old ${nextOldInstance.instanceId}")
             val goal = if (runSpec.isResident) Goal.Stopped else Goal.Decommissioned
             await(instanceTracker.setGoal(nextOldInstance.instanceId, goal, GoalChangeReason.Upgrading))
         }
