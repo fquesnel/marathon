@@ -100,23 +100,20 @@ class TaskReplaceActor(
   def step(health: Map[Instance.Id, Seq[Health]]): Unit = {
     logger.debug(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
     val current_instances = instanceTracker.specInstancesSync(pathId)
-    var new_running = 0
-    var old_running = 0
-    var new_failing = 0
-    var old_failing = 0
+    val state = new TransitionState()
     for (i <- current_instances) {
       if (i.runSpecVersion == runSpec.version) { // New version
-        if (isHealthy(i, health)) new_running += 1
-        else new_failing += 1
+        if (isHealthy(i, health)) state.newInstancesRunning += 1
+        else state.newInstancesFailing += 1
       } else { // Old instance
-        if (isHealthy(i, health)) old_running += 1
-        else old_failing += 1
+        if (isHealthy(i, health)) state.oldInstancesRunning += 1
+        else state.oldInstancesFailing += 1
       }
     }
 
-    logger.info(s"Found health status for ${pathId}: new_running=>${new_running} old_running=>${old_running} new_failing=>${new_failing} old_failing=>${old_failing}")
+    logger.info(s"Found health status for ${pathId}: new_running=>${state.newInstancesRunning} old_running=>${state.oldInstancesRunning} new_failing=>${state.newInstancesFailing} old_failing=>${state.oldInstancesFailing}")
 
-    val ignitionStrategy = computeRestartStrategy(runSpec, TransitionState(new_running, new_failing, old_running, old_failing))
+    val ignitionStrategy = computeRestartStrategy(runSpec, state)
 
     logger.info(s"restartStrategy gives : to_kill=>${ignitionStrategy.nrToKillImmediately} to_start=>${ignitionStrategy.nrToStartImmediately}")
 
@@ -129,7 +126,7 @@ class TaskReplaceActor(
     // Check if we reached the end of the deployment, meaning
     // that old instances (failing or running) are removed,
     // and new instances are all running.
-    checkFinished(new_running, old_running + old_failing)
+    checkFinished(state.newInstancesRunning, state.oldInstances)
   }
 
   override def postStop(): Unit = {
@@ -223,12 +220,16 @@ object TaskReplaceActor extends StrictLogging {
   private[impl] case class RestartStrategy(nrToKillImmediately: Int, nrToStartImmediately: Int, maxCapacity: Int)
 
   /** Encapsulates the logic of how the transition from old runspec to new is going */
-  private[impl] case class TransitionState(newInstancesRunning: Int, newInstancesFailing: Int, oldInstancesRunning: Int, oldInstancesFailing: Int)
+  class TransitionState(var newInstancesRunning: Int = 0, var newInstancesFailing: Int = 0, var oldInstancesRunning: Int = 0, var oldInstancesFailing: Int = 0) {
+    def oldInstances = oldInstancesFailing + oldInstancesRunning
+    def newInstances = newInstancesFailing + newInstancesRunning
+    def instancesCount = oldInstances + newInstances
+  }
 
   private[impl] def computeRestartStrategy(runSpec: RunSpec, state: TransitionState): RestartStrategy = {
     val consideredHealthyInstancesCount = state.newInstancesRunning + state.oldInstancesRunning
     val consideredUnhealthyInstancesCount = state.newInstancesFailing + state.oldInstancesFailing
-    val totalInstancesRunning = consideredHealthyInstancesCount + consideredUnhealthyInstancesCount
+    val totalInstancesRunning = state.instancesCount
 
     // in addition to a spec which passed validation, we require:
     require(runSpec.instances > 0, s"target instance number must be > 0 but is ${runSpec.instances}")
@@ -258,10 +259,10 @@ object TaskReplaceActor extends StrictLogging {
 
     // following condition addresses cases where we have extra-instances due to previous deployment adding extra-instances
     // and deployment is force-updated
-    if (runSpec.instances < state.newInstancesRunning + state.oldInstancesRunning + state.oldInstancesFailing) {
+    if (runSpec.instances < state.newInstancesRunning + state.oldInstances) {
       // NOTE: We don't take into account the new app that are failing to count this
       // This is to avoid killing apps started but not ready
-      nrToKillImmediately = math.max(state.newInstancesRunning + state.oldInstancesRunning + state.oldInstancesFailing - runSpec.instances, nrToKillImmediately)
+      nrToKillImmediately = math.max(state.newInstancesRunning + state.oldInstances - runSpec.instances, nrToKillImmediately)
       logger.info(s"runSpec.instances < currentInstances: Allowing killing all $nrToKillImmediately extra-instances")
     }
 
@@ -275,7 +276,7 @@ object TaskReplaceActor extends StrictLogging {
     assume(canStartNewInstances, "must be able to start new instances")
 
     val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning)
-    val instancesNotStartedYet = math.max(0, runSpec.instances - state.newInstancesRunning - state.newInstancesFailing)
+    val instancesNotStartedYet = math.max(0, runSpec.instances - state.newInstances)
     val nrToStartImmediately = math.min(instancesNotStartedYet, leftCapacity)
     RestartStrategy(nrToKillImmediately = nrToKillImmediately, nrToStartImmediately = nrToStartImmediately, maxCapacity = maxCapacity)
   }
