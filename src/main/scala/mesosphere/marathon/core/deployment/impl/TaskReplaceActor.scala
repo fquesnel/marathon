@@ -49,11 +49,12 @@ class TaskReplaceActor(
 
     // Fetch state of apps
     val system = akka.actor.ActorSystem("system")
+    // FIXME(t.lange): Make those 10 seconds configurable
     tick = system.scheduler.schedule(0 seconds, 10 seconds)(request_health_status)
   }
 
   def isHealthy(instance: Instance, healths: Map[Instance.Id, Seq[Health]]): Boolean = {
-    // FIXME: Or use state.healthy.getOrElse
+    // FIXME(t.lange): Or use state.healthy.getOrElse
     val i_health = healths.find(_._1 == instance.instanceId)
     if (instance.hasConfiguredHealthChecks && i_health.isDefined) { // Has healthchecks
       if (_isHealthy(i_health.get._2) == true) {
