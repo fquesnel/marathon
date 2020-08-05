@@ -54,24 +54,13 @@ class TaskReplaceActor(
   }
 
   def isHealthy(instance: Instance, healths: Map[Instance.Id, Seq[Health]]): Boolean = {
-    // FIXME(t.lange): Or use state.healthy.getOrElse
     val i_health = healths.find(_._1 == instance.instanceId)
-    if (instance.hasConfiguredHealthChecks && i_health.isDefined) { // Has healthchecks
-      if (_isHealthy(i_health.get._2) == true) {
-        logger.debug(s"Checking ${instance.instanceId}: has healcheck and is healthy")
-        return true
-      } else {
-        logger.debug(s"Checking ${instance.instanceId}: has healcheck and is NOT healthy")
-        return false
-      }
-    } else if (instance.hasConfiguredHealthChecks && !i_health.isDefined) {
-      logger.debug(s"Checking ${instance.instanceId}: has healhcheck and is UNKNOWN")
+    if (instance.hasConfiguredHealthChecks && i_health.isDefined)
+      return _isHealthy(i_health.get._2)
+    else if (instance.hasConfiguredHealthChecks && !i_health.isDefined)
       return false
-    } else { // Don't have healthchecks
-      logger.debug(s"Checking ${instance.instanceId}: has no healthchecks")
-      if (instance.state.goal == Goal.Running) return true
-      else return false
-    }
+    else
+      return instance.isRunning
   }
 
   def _isHealthy(healths: Seq[Health]): Boolean = {
@@ -87,7 +76,7 @@ class TaskReplaceActor(
 
   def step(health: Map[Instance.Id, Seq[Health]]): Unit = {
     logger.debug(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
-    val current_instances = instanceTracker.specInstancesSync(pathId).partition(_.runSpecVersion == runSpec.version)
+    val current_instances = instanceTracker.specInstancesSync(pathId, readAfterWrite = true).partition(_.runSpecVersion == runSpec.version)
 
     val new_instances = current_instances._1.partition(isHealthy(_, health))
     val old_instances = current_instances._2.partition(isHealthy(_, health))
@@ -215,7 +204,7 @@ object TaskReplaceActor extends StrictLogging {
     require(runSpec.instances > 0, s"target instance number must be > 0 but is ${runSpec.instances}")
     require(totalInstancesRunning >= 0, "current instances count must be >=0")
 
-    // Old and new instances that have the Goal.Running & are considered healthy
+    // Old and new instances that are running & are considered healthy
     require(consideredHealthyInstancesCount >= 0, s"running instances count must be >=0 but is $consideredHealthyInstancesCount")
 
     val minHealthy = (runSpec.instances * runSpec.upgradeStrategy.minimumHealthCapacity).ceil.toInt
