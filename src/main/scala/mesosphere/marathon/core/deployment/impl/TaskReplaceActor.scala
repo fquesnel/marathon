@@ -54,24 +54,13 @@ class TaskReplaceActor(
   }
 
   def isHealthy(instance: Instance, healths: Map[Instance.Id, Seq[Health]]): Boolean = {
-    // FIXME(t.lange): Or use state.healthy.getOrElse
     val i_health = healths.find(_._1 == instance.instanceId)
-    if (instance.hasConfiguredHealthChecks && i_health.isDefined) { // Has healthchecks
-      if (_isHealthy(i_health.get._2) == true) {
-        logger.debug(s"Checking ${instance.instanceId}: has healcheck and is healthy")
-        return true
-      } else {
-        logger.debug(s"Checking ${instance.instanceId}: has healcheck and is NOT healthy")
-        return false
-      }
-    } else if (instance.hasConfiguredHealthChecks && !i_health.isDefined) {
-      logger.debug(s"Checking ${instance.instanceId}: has healhcheck and is UNKNOWN")
+    if (instance.hasConfiguredHealthChecks && i_health.isDefined)
+      return _isHealthy(i_health.get._2)
+    else if (instance.hasConfiguredHealthChecks && !i_health.isDefined)
       return false
-    } else { // Don't have healthchecks
-      logger.debug(s"Checking ${instance.instanceId}: has no healthchecks")
-      if (instance.state.goal == Goal.Running) return true
-      else return false
-    }
+    else
+      return instance.isRunning
   }
 
   def _isHealthy(healths: Seq[Health]): Boolean = {
@@ -99,15 +88,15 @@ class TaskReplaceActor(
 
     logger.info(s"Found health status for ${pathId}: new_running=>${state.newInstancesRunning} old_running=>${state.oldInstancesRunning} new_failing=>${state.newInstancesFailing} old_failing=>${state.oldInstancesFailing}")
 
-    val ignitionStrategy = computeRestartStrategy(runSpec, state)
+    val restartStrategy = computeRestartStrategy(runSpec, state)
 
-    logger.info(s"restartStrategy gives : to_kill=>${ignitionStrategy.nrToKillImmediately} to_start=>${ignitionStrategy.nrToStartImmediately}")
+    logger.info(s"restartStrategy gives : to_kill=>${restartStrategy.nrToKillImmediately} to_start=>${restartStrategy.nrToStartImmediately}")
 
     // kill old instances to free some capacity
-    for (_ <- 0 until ignitionStrategy.nrToKillImmediately) killNextOldInstance(toKill)
+    for (_ <- 0 until restartStrategy.nrToKillImmediately) killNextOldInstance(toKill)
 
     // start new instances, if possible
-    launchInstances(ignitionStrategy.nrToStartImmediately).pipeTo(self)
+    launchInstances(restartStrategy.nrToStartImmediately).pipeTo(self)
 
     // Check if we reached the end of the deployment, meaning
     // that old instances (failing or running) are removed,
@@ -215,12 +204,12 @@ object TaskReplaceActor extends StrictLogging {
     require(runSpec.instances > 0, s"target instance number must be > 0 but is ${runSpec.instances}")
     require(totalInstancesRunning >= 0, "current instances count must be >=0")
 
-    // Old and new instances that have the Goal.Running & are considered healthy
+    // Old and new instances that are running & are considered healthy
     require(consideredHealthyInstancesCount >= 0, s"running instances count must be >=0 but is $consideredHealthyInstancesCount")
 
     val minHealthy = (runSpec.instances * runSpec.upgradeStrategy.minimumHealthCapacity).ceil.toInt
     var maxCapacity = (runSpec.instances * (1 + runSpec.upgradeStrategy.maximumOverCapacity)).toInt
-    var nrToKillImmediately = math.max(0, consideredHealthyInstancesCount - minHealthy)
+    var nrToKillImmediately = math.min(math.max(0, consideredHealthyInstancesCount - minHealthy), state.oldInstances)
 
     if (minHealthy == maxCapacity && maxCapacity <= consideredHealthyInstancesCount) {
       if (runSpec.isResident) {
@@ -252,12 +241,11 @@ object TaskReplaceActor extends StrictLogging {
 
     assume(nrToKillImmediately >= 0, s"nrToKillImmediately must be >=0 but is $nrToKillImmediately")
     assume(maxCapacity > 0, s"maxCapacity must be >0 but is $maxCapacity")
-    def canStartNewInstances: Boolean = minHealthy < maxCapacity || consideredHealthyInstancesCount - nrToKillImmediately < maxCapacity
-    assume(canStartNewInstances, "must be able to start new instances")
 
     val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning)
     val instancesNotStartedYet = math.max(0, runSpec.instances - state.newInstances)
     val nrToStartImmediately = math.min(instancesNotStartedYet, leftCapacity)
+    logger.info(s"For maxCapacity ${maxCapacity}, leftCapacity ${leftCapacity} and still not started ${instancesNotStartedYet}, will start ${nrToStartImmediately} now!")
     RestartStrategy(nrToKillImmediately = nrToKillImmediately, nrToStartImmediately = nrToStartImmediately, maxCapacity = maxCapacity)
   }
 }
