@@ -165,6 +165,21 @@ class RestartStrategyTest extends UnitTest {
       strategy.nrToKillImmediately shouldBe 0
     }
 
+    "strategy for normal app with 5 instances, already deployed" in {
+      Given("A normal app")
+      val app = AppDefinition(
+        id = AbsolutePathId("/app"),
+        role = "*",
+        instances = 5,
+        upgradeStrategy = UpgradeStrategy(minimumHealthCapacity = 0.5, maximumOverCapacity = 0))
+
+      When("the ignition strategy is computed")
+      val strategy = computeRestartStrategy(app, new TransitionState(4, 1, 0, 0))
+
+      Then("we kill no tasks immediately")
+      strategy.nrToKillImmediately shouldBe 0
+    }
+
     "maxCapacity strategy for normal app is not exceeded when a task can be killed immediately" in {
       Given("A normal app")
       val app = AppDefinition(
