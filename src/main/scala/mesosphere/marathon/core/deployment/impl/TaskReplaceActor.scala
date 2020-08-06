@@ -209,7 +209,7 @@ object TaskReplaceActor extends StrictLogging {
 
     val minHealthy = (runSpec.instances * runSpec.upgradeStrategy.minimumHealthCapacity).ceil.toInt
     var maxCapacity = (runSpec.instances * (1 + runSpec.upgradeStrategy.maximumOverCapacity)).toInt
-    var nrToKillImmediately = math.min(math.max(0, consideredHealthyInstancesCount - minHealthy), runSpec.instances - state.newInstances)
+    var nrToKillImmediately = math.max(0, consideredHealthyInstancesCount - minHealthy)
 
     if (minHealthy == maxCapacity && maxCapacity <= consideredHealthyInstancesCount) {
       if (runSpec.isResident) {
@@ -244,9 +244,10 @@ object TaskReplaceActor extends StrictLogging {
     def canStartNewInstances: Boolean = minHealthy < maxCapacity || consideredHealthyInstancesCount - nrToKillImmediately < maxCapacity
     assume(canStartNewInstances, "must be able to start new instances")
 
-    val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning)
+    val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning + nrToKillImmediately)
     val instancesNotStartedYet = math.max(0, runSpec.instances - state.newInstances)
     val nrToStartImmediately = math.min(instancesNotStartedYet, leftCapacity)
+    logger.info(s"For maxCapacity ${maxCapacity}, leftCapacity ${leftCapacity} and still not started ${instancesNotStartedYet}, will start ${nrToStartImmediately} now!")
     RestartStrategy(nrToKillImmediately = nrToKillImmediately, nrToStartImmediately = nrToStartImmediately, maxCapacity = maxCapacity)
   }
 }
