@@ -209,7 +209,7 @@ object TaskReplaceActor extends StrictLogging {
 
     val minHealthy = (runSpec.instances * runSpec.upgradeStrategy.minimumHealthCapacity).ceil.toInt
     var maxCapacity = (runSpec.instances * (1 + runSpec.upgradeStrategy.maximumOverCapacity)).toInt
-    var nrToKillImmediately = math.max(0, consideredHealthyInstancesCount - minHealthy)
+    var nrToKillImmediately = math.min(math.max(0, consideredHealthyInstancesCount - minHealthy), runSpec.instances - state.newInstances)
 
     if (minHealthy == maxCapacity && maxCapacity <= consideredHealthyInstancesCount) {
       if (runSpec.isResident) {
