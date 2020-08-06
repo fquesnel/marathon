@@ -10,7 +10,7 @@ import mesosphere.marathon.core.condition.Condition
 import mesosphere.marathon.core.condition.Condition.{Killed, Running}
 import mesosphere.marathon.core.deployment.{DeploymentPlan, DeploymentStep}
 import mesosphere.marathon.core.event._
-import mesosphere.marathon.core.health.{MarathonHttpHealthCheck, PortReference}
+import mesosphere.marathon.core.health.{MarathonHttpHealthCheck, PortReference, Health, Healthy}
 import mesosphere.marathon.core.instance.Instance.InstanceState
 import mesosphere.marathon.core.instance.update.InstanceChangedEventsGenerator
 import mesosphere.marathon.core.instance.{Goal, GoalChangeReason, Instance, TestInstanceBuilder}
@@ -24,11 +24,9 @@ import mesosphere.marathon.util.CancellableOnce
 import org.mockito.Mockito._
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.{Millis, Span}
-import org.scalatest.Ignore
 
 import scala.concurrent.{Future, Promise}
 
-@Ignore
 class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
   "TaskReplaceActor" should {
     "replace old tasks without health checks" in {
@@ -39,27 +37,25 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         instances = 5,
         versionInfo = VersionInfo.forNewConfig(Timestamp(0)),
         upgradeStrategy = UpgradeStrategy(0.0))
-      val instanceA = f.runningInstance(app)
-      val instanceB = f.runningInstance(app)
+      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
 
-      f.tracker.specInstancesSync(app.id, readAfterWrite = true) returns Seq(instanceA, instanceB)
-      f.tracker.get(instanceA.instanceId) returns Future.successful(Some(instanceA))
-      f.tracker.get(instanceB.instanceId) returns Future.successful(Some(instanceB))
+      val oldInstances = f.createInstances(app)
+      val newInstances = f.createInstances(newApp)
 
       val promise = Promise[Unit]()
-      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
       f.queue.add(newApp, 5) returns Future.successful(Done)
 
       val ref = f.replaceActor(newApp, promise)
       watch(ref)
 
-      for (_ <- 0 until newApp.instances)
-        ref ! f.instanceChanged(newApp, Running)
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 5, 0)
+      eventually {
+        for (instance <- oldInstances)
+          verify(f.tracker).setGoal(instance.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
+      }
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 5)
 
       promise.future.futureValue
-      verify(f.tracker).setGoal(instanceA.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
-      verify(f.tracker).setGoal(instanceB.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
-
       expectTerminated(ref)
     }
 
@@ -71,30 +67,25 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         instances = 5,
         versionInfo = VersionInfo.forNewConfig(Timestamp(0)),
         upgradeStrategy = UpgradeStrategy(0.0))
+      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
 
-      val instanceA = f.runningInstance(app)
+      val oldInstances = f.createInstances(app)
+      val newInstances = f.createInstances(newApp)
 
       val promise = Promise[Unit]()
-      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
-      f.queue.add(newApp, 4) returns Future.successful(Done)
-
-      val instanceC = f.runningInstance(newApp)
-
-      f.tracker.specInstancesSync(app.id, readAfterWrite = true) returns Seq(instanceA, instanceC)
-      f.tracker.get(instanceA.instanceId) returns Future.successful(Some(instanceA))
-      f.tracker.get(instanceC.instanceId) returns Future.successful(Some(instanceC))
+      f.queue.add(newApp, 1) returns Future.successful(Done)
 
       val ref = f.replaceActor(newApp, promise)
       watch(ref)
 
-      // Report all remaining instances as running.
-      for (_ <- 0 until (newApp.instances - 1))
-        ref ! f.instanceChanged(newApp, Running)
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 4)
+      eventually {
+        verify(f.tracker).setGoal(oldInstances(0).instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
+        verify(f.tracker, never).setGoal(newInstances(0).instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
+      }
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 5)
 
       promise.future.futureValue
-      verify(f.tracker).setGoal(instanceA.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
-      verify(f.tracker, never).setGoal(instanceC.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
-
       expectTerminated(ref)
     }
 
@@ -107,33 +98,31 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         versionInfo = VersionInfo.forNewConfig(Timestamp(0)),
         healthChecks = Set(MarathonHttpHealthCheck(portIndex = Some(PortReference(0)))),
         upgradeStrategy = UpgradeStrategy(0.0))
+      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
 
-      val instanceA = f.runningInstance(app)
-      val instanceB = f.runningInstance(app)
-
-      when(f.tracker.specInstancesSync(app.id, readAfterWrite = true)).thenReturn(Seq(instanceA, instanceB))
-      f.tracker.get(instanceA.instanceId) returns Future.successful(Some(instanceA))
-      f.tracker.get(instanceB.instanceId) returns Future.successful(Some(instanceB))
+      val oldInstances = f.createInstances(app)
+      val newInstances = f.createInstances(newApp)
 
       val promise = Promise[Unit]()
-      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
       f.queue.add(newApp, 5) returns Future.successful(Done)
 
       val ref = f.replaceActor(newApp, promise)
       watch(ref)
 
-      for (_ <- 0 until newApp.instances)
-        ref ! f.healthChanged(newApp, healthy = true)
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 5, 0)
+      eventually {
+        for (instance <- oldInstances)
+          verify(f.tracker).setGoal(instance.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
+      }
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 5)
 
       promise.future.futureValue
       verify(f.queue).resetDelay(newApp)
-      verify(f.tracker).setGoal(instanceA.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
-      verify(f.tracker).setGoal(instanceB.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
 
       expectTerminated(ref)
     }
 
-    "replace and scale down from more than new minCapacity" in {
+    "replace and scale down from more than new minCapacity" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -179,7 +168,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "replace tasks with minimum running number of tasks" in {
+    "replace tasks with minimum running number of tasks" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -238,7 +227,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "respect upgrade strategy" in {
+    "respect upgrade strategy" ignore {
       Given("An app with health checks, 1 task of new version already started but not passing health checks yet")
       val f = new Fixture
 
@@ -284,7 +273,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       // and we don't need to wait for end of deployment
     }
 
-    "replace tasks during rolling upgrade *without* over-capacity" in {
+    "replace tasks during rolling upgrade *without* over-capacity" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -353,7 +342,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "replace tasks during rolling upgrade *with* minimal over-capacity" in {
+    "replace tasks during rolling upgrade *with* minimal over-capacity" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -420,7 +409,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "replace tasks during rolling upgrade with 2/3 over-capacity" in {
+    "replace tasks during rolling upgrade with 2/3 over-capacity" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -485,7 +474,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "downscale tasks during rolling upgrade with 1 over-capacity" in {
+    "downscale tasks during rolling upgrade with 1 over-capacity" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -560,7 +549,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "stop the actor if all tasks are replaced already" in {
+    "stop the actor if all tasks are replaced already" ignore {
       Given("An app without health checks and readiness checks, as well as 2 tasks of this version")
       val f = new Fixture
       val app = AppDefinition(id = AbsolutePathId("/myApp"), instances = 2, role = "*")
@@ -580,7 +569,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       promise.future.futureValue
     }
 
-    "wait for readiness checks if all tasks are replaced already" in {
+    "wait for readiness checks if all tasks are replaced already" ignore {
       Given("An app without health checks but readiness checks, as well as 1 task of this version")
       val f = new Fixture
       val check = ReadinessCheck()
@@ -600,7 +589,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       promise.future.futureValue
     }
 
-    "wait for the readiness checks and health checks if all tasks are replaced already" in {
+    "wait for the readiness checks and health checks if all tasks are replaced already" ignore {
       Given("An app without health checks but readiness checks, as well as 1 task of this version")
       val f = new Fixture
       val ready = ReadinessCheck()
@@ -631,7 +620,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       promise.future.futureValue
     }
 
-    "wait until the tasks are killed" in {
+    "wait until the tasks are killed" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -664,7 +653,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       verify(f.tracker).setGoal(instanceB.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
     }
 
-    "wait for health and readiness checks for new tasks" in {
+    "wait for health and readiness checks for new tasks" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -724,7 +713,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
     }
 
     // regression DCOS-54927
-    "only handle InstanceChanged events of its own RunSpec" in {
+    "only handle InstanceChanged events of its own RunSpec" ignore {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -801,6 +790,26 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       val source = Source(instance.tasksMap.values.map(task => ReadinessCheckResult(checkName, task.taskId, ready, None)).toList).
         mapMaterializedValue { _ => cancellable }
       (cancellable, source)
+    }
+
+    def createInstances(app: AppDefinition): Seq[Instance] = {
+      var instances: Seq[Instance] = Seq[Instance]()
+      for (i <- 0 until app.instances) {
+        val instance = runningInstance(app)
+        instances = instances :+ instance
+        tracker.get(instance.instanceId) returns Future.successful(Some(instance))
+      }
+      return instances
+    }
+
+    def sendState(app: AppDefinition, newApp: AppDefinition, ref: ActorRef, oldInstances: Seq[Instance], newInstances: Seq[Instance], oldRunning: Int, newRunning: Int) = {
+      var map = Map[Instance.Id, Seq[Health]]()
+      for (i <- 0 until oldRunning)
+        map += (oldInstances(i).instanceId -> Seq(Health(oldInstances(i).instanceId).update(Healthy(null, null))))
+      for (i <- 0 until newRunning)
+        map += (newInstances(i).instanceId -> Seq(Health(newInstances(i).instanceId).update(Healthy(null, null))))
+      tracker.specInstancesSync(app.id) returns oldInstances.take(oldRunning) ++ newInstances.take(newRunning)
+      ref ! HealthStatusResponse(map)
     }
 
     def instanceChanged(app: AppDefinition, condition: Condition): InstanceChanged = {
