@@ -122,7 +122,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "replace and scale down from more than new minCapacity" ignore {
+    "replace and scale down from more than new minCapacity" in {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -162,10 +162,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 2)
       promise.future.futureValue
 
-      eventually {
-        verify(f.tracker, times(3)).setGoal(any, any, any)
-      }
-      verify(f.queue).resetDelay(newApp)
+      verify(f.tracker, times(3)).setGoal(any, any, any)
 
       expectTerminated(ref)
     }
@@ -442,7 +439,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       expectTerminated(ref)
     }
 
-    "downscale tasks during rolling upgrade with 1 over-capacity" ignore {
+    "downscale tasks during rolling upgrade with 1 over-capacity" in {
       val f = new Fixture
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -472,13 +469,9 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 4, 0)
       // one task is killed directly because we are over capacity
+      // we also can schedule one because overcapacity
       eventually {
         verify(f.tracker).setGoal(any, eq(Goal.Decommissioned), eq(GoalChangeReason.Upgrading))
-      }
-
-      // the kill is confirmed (see answer above) and the first new task is queued
-      f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 0)
-      eventually {
         verify(f.queue, times(1)).add(newApp, 1)
         verify(f.queue, times(1)).resetDelay(newApp)
       }
@@ -487,8 +480,6 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 1)
       eventually {
         verify(f.tracker, times(2)).setGoal(any, any, any)
-      }
-      eventually {
         verify(f.queue, times(2)).add(newApp, 1)
       }
 
@@ -496,8 +487,6 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 2)
       eventually {
         verify(f.tracker, times(3)).setGoal(any, any, any)
-      }
-      eventually {
         verify(f.queue, times(3)).add(newApp, 1)
       }
 
@@ -728,12 +717,6 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
     def runningInstance(app: AppDefinition): Instance = {
       TestInstanceBuilder.newBuilderForRunSpec(app, now = app.version)
         .addTaskWithBuilder().taskRunning().withNetworkInfo(hostName = Some(hostName), hostPorts = hostPorts).build()
-        .getInstance()
-    }
-
-    def healthyInstance(app: AppDefinition, healthy: Boolean = true): Instance = {
-      TestInstanceBuilder.newBuilderForRunSpec(app, now = app.version)
-        .addTaskWithBuilder().taskRunning().asHealthyTask(healthy).withNetworkInfo(hostName = Some(hostName), hostPorts = hostPorts).build()
         .getInstance()
     }
 
