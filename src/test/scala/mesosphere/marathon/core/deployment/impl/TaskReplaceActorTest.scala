@@ -157,7 +157,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 2)
-      eventually { app: AppDefinition => verify(f.queue, times(2)).add(app) }
+      eventually { newApp: AppDefinition => verify(f.queue, times(2)).add(newApp) }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 2)
       promise.future.futureValue
@@ -190,7 +190,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 0)
       // all new tasks are queued directly
-      eventually { app: AppDefinition => verify(f.queue, times(3)).add(app) }
+      eventually { newApp: AppDefinition => verify(f.queue, times(3)).add(newApp) }
 
       // ceiling(minimumHealthCapacity * 3) = 2 are left running
       eventually{
@@ -511,38 +511,38 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       When("The replace actor is started")
       val ref = f.replaceActor(app, promise)
       watch(ref)
+      f.sendState(app, app, ref, i, i, 0, 2)
 
       Then("The replace actor finishes immediately")
-      f.sendState(app, app, ref, i, i, 0, 2)
-      expectTerminated(ref)
       promise.future.futureValue
+      expectTerminated(ref)
     }
 
-    "wait for readiness checks if all tasks are replaced already" ignore {
+    "wait for readiness checks if all tasks are replaced already" in {
       Given("An app without health checks but readiness checks, as well as 1 task of this version")
       val f = new Fixture
       val check = ReadinessCheck()
       val port = PortDefinition(0, name = Some(check.portName))
       val app = AppDefinition(id = AbsolutePathId("/myApp"), role = "*", instances = 1, portDefinitions = Seq(port), readinessChecks = Seq(check))
-      val instance = f.runningInstance(app)
-      f.tracker.specInstancesSync(app.id, readAfterWrite = true) returns Seq(instance)
-      f.tracker.get(instance.instanceId) returns Future.successful(Some(instance))
-      val (_, readyCheck) = f.readinessResults(instance, check.name, ready = true)
+      val i = f.createInstances(app)
+      val (_, readyCheck) = f.readinessResults(i(0), check.name, ready = true)
       f.readinessCheckExecutor.execute(any[ReadinessCheckExecutor.ReadinessCheckSpec]) returns readyCheck
       val promise = Promise[Unit]()
 
       When("The replace actor is started")
-      f.replaceActor(app, promise)
+      val ref = f.replaceActor(app, promise)
+      watch(ref)
+      f.sendState(app, app, ref, i, i, 0, 1)
 
       Then("It needs to wait for the readiness checks to pass")
       promise.future.futureValue
+      expectTerminated(ref)
     }
 
-    "wait for the readiness checks and health checks if all tasks are replaced already" ignore {
+    "wait for the readiness checks and health checks if all tasks are replaced already" in {
       Given("An app without health checks but readiness checks, as well as 1 task of this version")
       val f = new Fixture
       val ready = ReadinessCheck()
-
       val port = PortDefinition(0, name = Some(ready.portName))
       val app = AppDefinition(
         id = AbsolutePathId("/myApp"),
@@ -552,21 +552,19 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         readinessChecks = Seq(ready),
         healthChecks = Set(MarathonHttpHealthCheck())
       )
-      val instance = f.runningInstance(app)
-      f.tracker.specInstancesSync(app.id, readAfterWrite = true) returns Seq(instance)
-      f.tracker.get(instance.instanceId) returns Future.successful(Some(instance))
-      val (_, readyCheck) = f.readinessResults(instance, ready.name, ready = true)
+      val i = f.createInstances(app)
+      val (_, readyCheck) = f.readinessResults(i(0), ready.name, ready = true)
       f.readinessCheckExecutor.execute(any[ReadinessCheckExecutor.ReadinessCheckSpec]) returns readyCheck
       val promise = Promise[Unit]()
 
       When("The replace actor is started")
       val ref = f.replaceActor(app, promise)
       watch(ref)
-      ref ! InstanceHealthChanged(instance.instanceId, app.version, app.id, healthy = Some(true))
+      f.sendState(app, app, ref, i, i, 0, 1)
 
       Then("It needs to wait for the readiness checks to pass")
-      expectTerminated(ref)
       promise.future.futureValue
+      expectTerminated(ref)
     }
 
     "wait until the tasks are killed" in {
@@ -609,50 +607,50 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         readinessChecks = Seq(ReadinessCheck()),
         upgradeStrategy = UpgradeStrategy(1.0, 1.0)
       )
+      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
 
-      val instance = f.runningInstance(app)
-
-      f.tracker.specInstancesSync(app.id, readAfterWrite = true) returns Seq(instance)
-      f.tracker.get(instance.instanceId) returns Future.successful(Some(instance))
+      val oldInstances = f.createInstances(app)
+      val newInstances = f.createInstances(newApp)
 
       val promise = Promise[Unit]()
-      val newApp = app.copy(versionInfo = VersionInfo.forNewConfig(Timestamp(1)))
       f.queue.add(newApp, 1) returns Future.successful(Done)
+
       val ref = f.replaceActor(newApp, promise)
       watch(ref)
 
       // only one task is queued directly
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 0)
       val queueOrder = org.mockito.Mockito.inOrder(f.queue)
       eventually {
         queueOrder.verify(f.queue).add(_: AppDefinition, 1)
       }
 
       val newInstanceId = Instance.Id.forRunSpec(newApp.id)
-      val newTaskId = Task.Id(newInstanceId)
+      val newTaskId = Task.Id(newInstances(0).instanceId)
 
       //unhealthy
-      ref ! InstanceHealthChanged(newInstanceId, newApp.version, newApp.id, healthy = Some(false))
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 0, 1)
       eventually {
         verify(f.tracker, never).setGoal(any, any, any)
       }
 
       //unready
-      ref ! ReadinessCheckResult(ReadinessCheck.DefaultName, newTaskId, ready = false, None)
-      eventually {
-        verify(f.tracker, never).setGoal(any, any, any)
-      }
+      //ref ! ReadinessCheckResult(ReadinessCheck.DefaultName, newTaskId, ready = false, None)
+      //eventually {
+      //  verify(f.tracker, never).setGoal(any, any, any)
+      //}
 
       //healthy
-      ref ! InstanceHealthChanged(newInstanceId, newApp.version, newApp.id, healthy = Some(true))
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 1)
       eventually {
         verify(f.tracker, never).setGoal(any, any, any)
       }
 
       //ready
-      ref ! ReadinessCheckResult(ReadinessCheck.DefaultName, newTaskId, ready = true, None)
-      eventually {
-        verify(f.tracker, once).setGoal(any, any, any)
-      }
+      //ref ! ReadinessCheckResult(ReadinessCheck.DefaultName, newTaskId, ready = true, None)
+      //eventually {
+      //  verify(f.tracker, once).setGoal(any, any, any)
+      //}
 
       promise.future.futureValue
     }
