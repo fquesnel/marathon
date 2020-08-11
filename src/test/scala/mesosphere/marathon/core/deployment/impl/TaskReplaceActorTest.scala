@@ -252,12 +252,8 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       // and we can check deployment continue as usual
       eventually {
         verify(f.tracker, times(1)).setGoal(any, any, any)
-      }
-      f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 1)
-      eventually {
         verify(f.queue, times(1)).add(newApp, 1)
       }
-
       f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 2)
       promise.future.futureValue
       expectTerminated(ref)

@@ -155,6 +155,7 @@ class DeploymentManagerActor(
       val s = sender()
       healthCheckManager.statuses(appId) onComplete {
         case Success(r) =>
+          //TODO(t.lange): Add ReadinessCheck
           s ! HealthStatusResponse(r)
         case Failure(e) => logger.error(s"Failed to send health status to TaskReplaceActor!", e)
       }
