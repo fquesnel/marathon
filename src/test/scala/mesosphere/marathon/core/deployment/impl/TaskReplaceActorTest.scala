@@ -419,7 +419,6 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       }
 
       // second new task becomes healthy and another old task is killed
-      ref ! f.healthChanged(newApp, healthy = true)
       f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 2, newUnhealthy = 1)
       eventually {
         verify(f.tracker, times(2)).setGoal(any, any, any)
@@ -748,18 +747,6 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         map += (newInstances(i + newRunning).instanceId -> Seq(Health(newInstances(i + newRunning).instanceId).update(Unhealthy(null, null, ""))))
       tracker.specInstancesSync(app.id) returns oldInstances.take(oldRunning) ++ newInstances.take(newRunning + newUnhealthy)
       ref ! HealthStatusResponse(map)
-    }
-
-    def instanceChanged(app: AppDefinition, condition: Condition): InstanceChanged = {
-      val instanceId = Instance.Id.forRunSpec(app.id)
-      val state = InstanceState(Condition.Running, Timestamp.now(), None, None, Goal.Running)
-      val instance: Instance = Instance(instanceId, None, state, Map.empty, app, None, "*")
-
-      InstanceChanged(instanceId, app.version, app.id, condition, instance)
-    }
-
-    def healthChanged(app: AppDefinition, healthy: Boolean): InstanceHealthChanged = {
-      InstanceHealthChanged(Instance.Id.forRunSpec(app.id), app.version, app.id, healthy = Some(healthy))
     }
 
     def replaceActor(app: AppDefinition, promise: Promise[Unit]): ActorRef = system.actorOf(
