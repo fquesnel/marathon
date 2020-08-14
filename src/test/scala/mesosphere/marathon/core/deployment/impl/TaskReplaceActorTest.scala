@@ -157,7 +157,9 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 2)
-      eventually { newApp: AppDefinition => verify(f.queue, times(2)).add(newApp) }
+      eventually {
+        verify(f.queue, times(1)).add(newApp, 2)
+      }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 2)
       promise.future.futureValue
@@ -190,7 +192,9 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 0)
       // all new tasks are queued directly
-      eventually { newApp: AppDefinition => verify(f.queue, times(3)).add(newApp) }
+      eventually {
+        verify(f.queue, times(1)).add(newApp, 3)
+      }
 
       // ceiling(minimumHealthCapacity * 3) = 2 are left running
       eventually{
@@ -590,6 +594,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
       for (instance <- oldInstances)
         verify(f.tracker, never).setGoal(instance.instanceId, Goal.Decommissioned, GoalChangeReason.Upgrading)
+      expectTerminated(ref)
     }
 
     "wait for health and readiness checks for new tasks" ignore {
@@ -649,6 +654,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       //}
 
       promise.future.futureValue
+      expectTerminated(ref)
     }
 
     // regression DCOS-54927
@@ -679,6 +685,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
       ref ! HealthStatusResponse(Map(good_instance.instanceId -> Seq(Health(good_instance.instanceId).update(Healthy(null, null)))))
       promise.future.futureValue
+      expectTerminated(ref)
     }
   }
   class Fixture {
