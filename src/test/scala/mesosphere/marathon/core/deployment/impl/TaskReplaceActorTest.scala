@@ -135,13 +135,14 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
         role = "*",
         instances = 2,
         versionInfo = VersionInfo.forNewConfig(Timestamp(1)),
+        healthChecks = Set(MarathonHttpHealthCheck(portIndex = Some(PortReference(0)))),
         upgradeStrategy = UpgradeStrategy(minimumHealthCapacity = 1.0))
 
       val oldInstances = f.createInstances(app)
       val newInstances = f.createInstances(newApp)
 
       val promise = Promise[Unit]()
-      f.queue.add(newApp, 1) returns Future.successful(Done)
+      f.queue.add(newApp, 2) returns Future.successful(Done)
 
       val ref = f.replaceActor(newApp, promise)
       watch(ref)
@@ -149,22 +150,21 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 0)
       eventually {
         verify(f.tracker, once).setGoal(any, any, any)
+        verify(f.queue, times(1)).add(newApp, 2)
       }
 
-      f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 1)
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 1, newUnhealthy = 1)
       eventually {
         verify(f.tracker, times(2)).setGoal(any, any, any)
       }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 2)
       eventually {
-        verify(f.queue, times(1)).add(newApp, 2)
+        verify(f.tracker, times(3)).setGoal(any, any, any)
       }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 2)
       promise.future.futureValue
-
-      verify(f.tracker, times(3)).setGoal(any, any, any)
 
       expectTerminated(ref)
     }
