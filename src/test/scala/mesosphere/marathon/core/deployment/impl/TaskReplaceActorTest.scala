@@ -24,11 +24,9 @@ import mesosphere.marathon.util.CancellableOnce
 import org.mockito.Mockito._
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.{Millis, Span}
-import org.scalatest.Ignore
 
 import scala.concurrent.{Future, Promise}
 
-@Ignore
 class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
   "TaskReplaceActor" should {
     "replace old tasks without health checks" in {
