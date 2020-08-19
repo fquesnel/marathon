@@ -88,15 +88,15 @@ class TaskReplaceActor(
 
     logger.info(s"Found health status for ${pathId}: new_running=>${state.newInstancesRunning} old_running=>${state.oldInstancesRunning} new_failing=>${state.newInstancesFailing} old_failing=>${state.oldInstancesFailing}")
 
-    val ignitionStrategy = computeRestartStrategy(runSpec, state)
+    val restartStrategy = computeRestartStrategy(runSpec, state)
 
-    logger.info(s"restartStrategy gives : to_kill=>${ignitionStrategy.nrToKillImmediately} to_start=>${ignitionStrategy.nrToStartImmediately}")
+    logger.info(s"restartStrategy gives : to_kill=>${restartStrategy.nrToKillImmediately} to_start=>${restartStrategy.nrToStartImmediately}")
 
     // kill old instances to free some capacity
-    for (_ <- 0 until ignitionStrategy.nrToKillImmediately) killNextOldInstance(toKill)
+    for (_ <- 0 until restartStrategy.nrToKillImmediately) killNextOldInstance(toKill)
 
     // start new instances, if possible
-    launchInstances(ignitionStrategy.nrToStartImmediately).pipeTo(self)
+    launchInstances(restartStrategy.nrToStartImmediately).pipeTo(self)
 
     // Check if we reached the end of the deployment, meaning
     // that old instances (failing or running) are removed,
