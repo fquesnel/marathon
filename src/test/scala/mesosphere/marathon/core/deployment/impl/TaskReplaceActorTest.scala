@@ -142,7 +142,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       val newInstances = f.createInstances(newApp)
 
       val promise = Promise[Unit]()
-      f.queue.add(newApp, 2) returns Future.successful(Done)
+      f.queue.add(newApp, 1) returns Future.successful(Done)
 
       val ref = f.replaceActor(newApp, promise)
       watch(ref)
@@ -150,12 +150,13 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 0)
       eventually {
         verify(f.tracker, once).setGoal(any, any, any)
-        verify(f.queue, times(1)).add(newApp, 2)
+        verify(f.queue, times(1)).add(newApp, 1)
       }
 
-      f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 1, newUnhealthy = 1)
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 1)
       eventually {
         verify(f.tracker, times(2)).setGoal(any, any, any)
+        verify(f.queue, times(2)).add(newApp, 1)
       }
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 2)
@@ -256,6 +257,9 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       // and we can check deployment continue as usual
       eventually {
         verify(f.tracker, times(1)).setGoal(any, any, any)
+      }
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 1)
+      eventually {
         verify(f.queue, times(1)).add(newApp, 1)
       }
       f.sendState(app, newApp, ref, oldInstances, newInstances, 0, 2)
@@ -468,17 +472,25 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
       f.sendState(app, newApp, ref, oldInstances, newInstances, 4, 0)
       // one task is killed directly because we are over capacity
-      // we also can schedule one because overcapacity
       eventually {
         verify(f.tracker).setGoal(any, eq(Goal.Decommissioned), eq(GoalChangeReason.Upgrading))
-        verify(f.queue, times(1)).add(newApp, 1)
         verify(f.queue, times(1)).resetDelay(newApp)
+      }
+
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 0)
+      eventually {
+        verify(f.queue, times(1)).add(newApp, 1)
       }
 
       // first new task becomes healthy and another old task is killed
       f.sendState(app, newApp, ref, oldInstances, newInstances, 3, 1)
       eventually {
         verify(f.tracker, times(2)).setGoal(any, any, any)
+      }
+
+      // Task is killed, and now we can schedule a new one
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 1)
+      eventually {
         verify(f.queue, times(2)).add(newApp, 1)
       }
 
@@ -486,6 +498,10 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
       f.sendState(app, newApp, ref, oldInstances, newInstances, 2, 2)
       eventually {
         verify(f.tracker, times(3)).setGoal(any, any, any)
+      }
+
+      f.sendState(app, newApp, ref, oldInstances, newInstances, 1, 2)
+      eventually {
         verify(f.queue, times(3)).add(newApp, 1)
       }
 

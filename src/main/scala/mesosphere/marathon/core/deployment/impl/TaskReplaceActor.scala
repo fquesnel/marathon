@@ -241,10 +241,8 @@ object TaskReplaceActor extends StrictLogging {
 
     assume(nrToKillImmediately >= 0, s"nrToKillImmediately must be >=0 but is $nrToKillImmediately")
     assume(maxCapacity > 0, s"maxCapacity must be >0 but is $maxCapacity")
-    def canStartNewInstances: Boolean = minHealthy < maxCapacity || consideredHealthyInstancesCount - nrToKillImmediately < maxCapacity
-    assume(canStartNewInstances, "must be able to start new instances")
 
-    val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning + nrToKillImmediately)
+    val leftCapacity = math.max(0, maxCapacity - totalInstancesRunning)
     val instancesNotStartedYet = math.max(0, runSpec.instances - state.newInstances)
     val nrToStartImmediately = math.min(instancesNotStartedYet, leftCapacity)
     logger.info(s"For maxCapacity ${maxCapacity}, leftCapacity ${leftCapacity} and still not started ${instancesNotStartedYet}, will start ${nrToStartImmediately} now!")
