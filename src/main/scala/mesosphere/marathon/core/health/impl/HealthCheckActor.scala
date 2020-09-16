@@ -86,6 +86,7 @@ private[health] class HealthCheckActor(
     // }
     healthByInstanceId.filterKeys(activeTaskIds)
     killingInFlight &= activeTaskIds
+    logger.info(s"[anti-snowball] currently ${killingInFlight.size} instances killingInFlight")
 
     val checksToPurge = instances.withFilter(!_.isActive).map(instance => {
       val instanceKey = InstanceKey(ApplicationKey(instance.runSpecId, instance.runSpecVersion), instance.instanceId)
