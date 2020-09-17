@@ -80,7 +80,7 @@ private[health] class HealthCheckActor(
     healthByTaskId.retain((taskId, health) => activeTaskIds(taskId))
     // FIXME: I discovered this is unsafe since killingInFlight might be used in 2 concurrent threads (see preStart method above)
     killingInFlight &= activeTaskIds
-    logger.info(s"[anti-snowball] currently ${killingInFlight.size} instances killingInFlight")
+    logger.info(s"[anti-snowball] app ${app.id} version ${app.version} currently ${killingInFlight.size} instances killingInFlight")
 
     val checksToPurge = instances.withFilter(!_.isActive).map(instance => {
       val instanceKey = InstanceKey(ApplicationKey(instance.runSpecId, instance.runSpecVersion), instance.instanceId)
@@ -105,7 +105,7 @@ private[health] class HealthCheckActor(
         logger.info(s"Instance $instanceId on host ${instance.hostname} is temporarily unreachable. Performing no kill.")
       } else {
         if (antiSnowballEnabled && !(checkEnoughInstancesRunning(instance))) {
-          logger.info(s"[anti-snowball] Won't kill $instanceId because too few instances are running")
+          logger.info(s"[anti-snowball] app ${app.id} version ${app.version} Won't kill $instanceId because too few instances are running")
           return
         }
         logger.info(s"Send kill request for $instanceId on host ${instance.hostname.getOrElse("unknown")} to driver")
@@ -124,7 +124,7 @@ private[health] class HealthCheckActor(
           )
         )
         killingInFlight = killingInFlight + taskId
-        logger.info(s"[anti-snowball] killing ${instanceId}, currently ${killingInFlight.size} instances killingInFlight")
+        logger.info(s"[anti-snowball] app ${app.id} version ${app.version} killing ${instanceId}, currently ${killingInFlight.size} instances killingInFlight")
         killService.killInstancesAndForget(Seq(instance), KillReason.FailedHealthChecks)
       }
     }
@@ -142,13 +142,13 @@ private[health] class HealthCheckActor(
     val healthyInstances = healthByTaskId.filterKeys(activeTaskIds)
       .filterKeys(taskId => !killingInFlight(taskId))
 
-    logger.info(s"[anti-snowball] currently ${killingInFlight.size} instances killingInFlight")
+    logger.info(s"[anti-snowball] app ${app.id} version ${app.version} currently ${killingInFlight.size} instances killingInFlight")
 
     val futureHealthyInstances = healthyInstances.filterKeys(taskId => unhealthyInstance.appTask.taskId != taskId)
       .count{ case (_, health) => health.ready }
 
     val futureHealthyCapacity: Double = futureHealthyInstances / app.instances.toDouble
-    logger.debug(s"[anti-snowball] checkEnoughInstancesRunning: $futureHealthyCapacity >= ${app.upgradeStrategy.minimumHealthCapacity}")
+    logger.debug(s"[anti-snowball] app ${app.id} version ${app.version} checkEnoughInstancesRunning: $futureHealthyCapacity >= ${app.upgradeStrategy.minimumHealthCapacity}")
     futureHealthyCapacity >= app.upgradeStrategy.minimumHealthCapacity
   }
 
