@@ -76,14 +76,7 @@ private[health] class HealthCheckActor(
   def purgeStatusOfDoneInstances(instances: Seq[Instance]): Unit = {
     logger.debug(s"Purging health status of inactive instances for app ${app.id} version ${app.version} and healthCheck ${healthCheck}")
 
-    // val inactiveInstanceIds: Set[Instance.Id] = instances.filterNot(_.isActive).map(_.instanceId)(collection.breakOut)
-    // val inactiveInstanceIds: Set[Task.Id] = instances.map(_.appTask).filterNot(_.isActive).map(_.taskId)(collection.breakOut)
     val activeTaskIds: Set[Task.Id] = instances.map(_.appTask).filter(_.isActive).map(_.taskId)(collection.breakOut)
-    // inactiveInstanceIds.foreach { inactiveId =>
-    //   healthByInstanceId.remove(inactiveId)
-    //   // Remove inactive (definitively killed) instance from killingInFlight list
-    //   killingInFlight = killingInFlight - inactiveId
-    // }
     healthByInstanceId.retain((taskId, health) => activeTaskIds(taskId))
     // FIXME: I discovered this is unsafe since killingInFlight might be used in 2 concurrent threads (see preStart method above)
     killingInFlight &= activeTaskIds
