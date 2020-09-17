@@ -6,7 +6,6 @@ import mesosphere.marathon.state.Timestamp
 
 case class Health(
     instanceId: Instance.Id,
-    // TODO: add taskId here
     firstSuccess: Option[Timestamp] = None,
     lastSuccess: Option[Timestamp] = None,
     lastFailure: Option[Timestamp] = None,
