@@ -84,7 +84,8 @@ private[health] class HealthCheckActor(
     //   // Remove inactive (definitively killed) instance from killingInFlight list
     //   killingInFlight = killingInFlight - inactiveId
     // }
-    healthByInstanceId.filterKeys(activeTaskIds)
+    healthByInstanceId.retain((taskId, health) => activeTaskIds(taskId))
+    // FIXME: I discovered this is unsafe since killingInFlight might be used in 2 concurrent threads (see preStart method above)
     killingInFlight &= activeTaskIds
     logger.info(s"[anti-snowball] currently ${killingInFlight.size} instances killingInFlight")
 
