@@ -35,7 +35,7 @@ private[health] class HealthCheckActor(
   implicit val mat = ActorMaterializer()
   import context.dispatcher
 
-  val healthByInstanceId = TrieMap.empty[Task.Id, Health]
+  val healthByTaskId = TrieMap.empty[Task.Id, Health]
   var killingInFlight = Set.empty[Task.Id]
 
   override def preStart(): Unit = {
@@ -77,7 +77,7 @@ private[health] class HealthCheckActor(
     logger.debug(s"Purging health status of inactive instances for app ${app.id} version ${app.version} and healthCheck ${healthCheck}")
 
     val activeTaskIds: Set[Task.Id] = instances.map(_.appTask).filter(_.isActive).map(_.taskId)(collection.breakOut)
-    healthByInstanceId.retain((taskId, health) => activeTaskIds(taskId))
+    healthByTaskId.retain((taskId, health) => activeTaskIds(taskId))
     // FIXME: I discovered this is unsafe since killingInFlight might be used in 2 concurrent threads (see preStart method above)
     killingInFlight &= activeTaskIds
     logger.info(s"[anti-snowball] currently ${killingInFlight.size} instances killingInFlight")
@@ -139,7 +139,7 @@ private[health] class HealthCheckActor(
     val instances: Seq[Instance] = instanceTracker.specInstancesSync(app.id)
     // val activeInstanceIds: Set[Instance.Id] = instances.withFilter(_.isActive).map(_.instanceId)(collection.breakOut)
     val activeTaskIds: Set[Task.Id] = instances.map(_.appTask).filter(_.isActive).map(_.taskId)(collection.breakOut)
-    val healthyInstances = healthByInstanceId.filterKeys(activeTaskIds)
+    val healthyInstances = healthByTaskId.filterKeys(activeTaskIds)
       .filterKeys(taskId => !killingInFlight(taskId))
 
     logger.info(s"[anti-snowball] currently ${killingInFlight.size} instances killingInFlight")
@@ -164,7 +164,7 @@ private[health] class HealthCheckActor(
 
   def handleHealthResult(result: HealthResult): Unit = {
     val instanceId = result.instanceId
-    val health = healthByInstanceId.getOrElse(result.taskId, Health(instanceId))
+    val health = healthByTaskId.getOrElse(result.taskId, Health(instanceId))
 
     val updatedHealth = result match {
       case Healthy(_, _, _, _, _) =>
@@ -206,7 +206,7 @@ private[health] class HealthCheckActor(
     val newHealth = instanceHealth.newHealth
 
     logger.info(s"Received health result for app [${app.id}] version [${app.version}]: [$result]")
-    healthByInstanceId += (result.taskId -> instanceHealth.newHealth)
+    healthByTaskId += (result.taskId -> instanceHealth.newHealth)
     appHealthCheckActor ! HealthCheckStatusChanged(ApplicationKey(app.id, app.version), healthCheck, newHealth)
 
     if (health.alive != newHealth.alive && result.publishEvent) {
@@ -216,11 +216,11 @@ private[health] class HealthCheckActor(
 
   def receive: Receive = {
     case GetInstanceHealth(instanceId) =>
-      sender() ! healthByInstanceId.find(_._1.instanceId == instanceId)
+      sender() ! healthByTaskId.find(_._1.instanceId == instanceId)
         .map(_._2).getOrElse(Health(instanceId))
 
     case GetAppHealth =>
-      sender() ! AppHealth(healthByInstanceId.values.to[Seq])
+      sender() ! AppHealth(healthByTaskId.values.to[Seq])
 
     case result: HealthResult if result.version == app.version =>
       handleHealthResult(result)
