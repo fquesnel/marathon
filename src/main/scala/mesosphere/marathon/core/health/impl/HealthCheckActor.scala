@@ -141,7 +141,6 @@ private[health] class HealthCheckActor(
   /** Check if enough active and ready instances will remain if we kill 1 unhealthy instance */
   def checkEnoughInstancesRunning(unhealthyInstance: Instance): Boolean = {
     val instances: Seq[Instance] = instanceTracker.specInstancesSync(app.id)
-    // val activeInstanceIds: Set[Instance.Id] = instances.withFilter(_.isActive).map(_.instanceId)(collection.breakOut)
     val activeTaskIds: Set[Task.Id] = getActiveTaskForInstances(instances)
     val healthyInstances = healthByTaskId.filterKeys(activeTaskIds)
       .filterKeys(taskId => !killingInFlight(taskId))
