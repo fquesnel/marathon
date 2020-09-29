@@ -108,12 +108,12 @@ private[health] class HealthCheckActor(
       if (instance.isUnreachable) {
         logger.info(s"Instance $instanceId on host ${instance.hostname} is temporarily unreachable. Performing no kill.")
       } else {
+        require(instance.tasksMap.size == 1, "Unexpected pod instance in HealthCheckActor")
         if (antiSnowballEnabled && !(checkEnoughInstancesRunning(instance))) {
           logger.info(s"[anti-snowball] app ${app.id} version ${app.version} Won't kill $instanceId because too few instances are running")
           return
         }
         logger.info(s"Send kill request for $instanceId on host ${instance.hostname.getOrElse("unknown")} to driver")
-        require(instance.tasksMap.size == 1, "Unexpected pod instance in HealthCheckActor")
         val taskId = instance.appTask.taskId
         eventBus.publish(
           UnhealthyInstanceKillEvent(
