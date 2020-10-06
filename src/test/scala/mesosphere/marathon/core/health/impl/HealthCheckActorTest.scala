@@ -8,6 +8,7 @@ import akka.stream.scaladsl.{MergeHub, Sink}
 import akka.testkit._
 import mesosphere.AkkaUnitTest
 import mesosphere.marathon.core.health.impl.AppHealthCheckActor.PurgeHealthCheckStatuses
+import mesosphere.marathon.core.health.impl.HealthCheckShieldManager
 import mesosphere.marathon.core.health.{Health, HealthCheck, Healthy, MarathonHealthCheck, MarathonHttpHealthCheck, PortReference}
 import mesosphere.marathon.core.instance.{Instance, TestInstanceBuilder}
 import mesosphere.marathon.core.task.Task
@@ -51,13 +52,15 @@ class HealthCheckActorTest extends AkkaUnitTest {
         .to(Sink.ignore)
         .run()
 
+    val healthCheckShieldManager = new HealthCheckShieldManager()
+
     def runningInstance(): Instance = {
       TestInstanceBuilder.newBuilder(appId).addTaskRunning().getInstance()
     }
 
     def actor(healthCheck: HealthCheck, instances: Seq[Instance], app: AppDefinition = app) = TestActorRef[HealthCheckActor](
       Props(
-        new HealthCheckActor(app, appHealthCheckActor.ref, killService, healthCheck, instanceTracker, system.eventStream, healthCheckWorkerHub) {
+        new HealthCheckActor(app, appHealthCheckActor.ref, killService, healthCheck, instanceTracker, system.eventStream, healthCheckWorkerHub, healthCheckShieldManager) {
           instances.map(instance => {
             val taskId = instance.appTask.taskId
             healthByTaskId += (taskId -> Health(instance.instanceId)
@@ -76,7 +79,8 @@ class HealthCheckActorTest extends AkkaUnitTest {
           healthCheck,
           instanceTracker,
           system.eventStream,
-          healthCheckWorkerHub) {
+          healthCheckWorkerHub,
+          healthCheckShieldManager) {
         }
       )
     )
