@@ -13,6 +13,8 @@ import mesosphere.marathon.core.event.{AddHealthCheck, RemoveHealthCheck}
 import mesosphere.marathon.core.group.GroupManager
 import mesosphere.marathon.core.health._
 import mesosphere.marathon.core.health.impl.AppHealthCheckActor.ApplicationKey
+import mesosphere.marathon.core.health.impl.HealthCheckShieldManager
+import mesosphere.marathon.core.health.HealthCheckShield
 import mesosphere.marathon.core.health.impl.HealthCheckActor.{AppHealth, GetAppHealth, GetInstanceHealth}
 import mesosphere.marathon.core.instance.Instance
 import mesosphere.marathon.core.task.Task
@@ -23,7 +25,7 @@ import mesosphere.util.RWLock
 import org.apache.mesos.Protos.TaskStatus
 
 import scala.async.Async._
-import scala.collection.immutable.{Map, Seq}
+import scala.collection.immutable.Map
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
@@ -46,6 +48,8 @@ class MarathonHealthCheckManager(
     RWLock(mutable.Map.empty.withDefaultValue(Map.empty.withDefaultValue(Set.empty)))
 
   protected[this] var appHealthChecksActor: ActorRef = actorRefFactory.actorOf(AppHealthCheckActor.props(eventBus))
+
+  private[this] val healthCheckShieldManager: HealthCheckShieldManager = new HealthCheckShieldManager()
 
   override def list(appId: AbsolutePathId): Set[HealthCheck] =
     listActive(appId).map(_.healthCheck)
@@ -86,6 +90,18 @@ class MarathonHealthCheckManager(
       ahcs(appId)(appVersion)
     }
 
+  override def enableShield(taskId: Task.Id, duration: FiniteDuration): Unit = {
+    healthCheckShieldManager.enableShield(taskId, duration)
+  }
+
+  override def disableShield(taskId: Task.Id): Unit = {
+    healthCheckShieldManager.disableShield(taskId)
+  }
+
+  override def listShields(): Seq[HealthCheckShield] = {
+    healthCheckShieldManager.getShields()
+  }
+
   override def add(app: AppDefinition, healthCheck: HealthCheck, instances: Seq[Instance]): Unit =
     appHealthChecks.writeLock { ahcs =>
       val healthChecksForApp = listActive(app.id, app.version)
@@ -96,7 +112,7 @@ class MarathonHealthCheckManager(
         logger.info(s"Adding health check for app [${app.id}] and version [${app.version}]: [$healthCheck]")
 
         val ref = actorRefFactory.actorOf(
-          HealthCheckActor.props(app, appHealthChecksActor, killService, healthCheck, instanceTracker, eventBus, healthCheckWorkerHub))
+          HealthCheckActor.props(app, appHealthChecksActor, killService, healthCheck, instanceTracker, eventBus, healthCheckWorkerHub, healthCheckShieldManager))
         val newHealthChecksForApp =
           healthChecksForApp + ActiveHealthCheck(healthCheck, ref)
 

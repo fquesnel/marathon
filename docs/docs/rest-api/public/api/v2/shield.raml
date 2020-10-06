@@ -1,0 +1,11 @@
+get:
+  description:
+    List all shields
+  is: [ secured ]
+  queryParameters:
+  responses:
+    200:
+      description: Whatever
+      body:
+        application/json:
+          type: healthCheck.HealthCheckShield
