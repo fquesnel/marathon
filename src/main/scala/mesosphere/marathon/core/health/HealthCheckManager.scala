@@ -6,7 +6,6 @@ import mesosphere.marathon.core.instance.Instance
 import mesosphere.marathon.state.{AbsolutePathId, AppDefinition, Timestamp}
 import mesosphere.marathon.core.task.Task
 import org.apache.mesos.Protos.TaskStatus
-import mesosphere.marathon.core.health.HealthCheckShield
 
 import scala.collection.immutable.Map
 import scala.concurrent.Future
@@ -65,9 +64,9 @@ trait HealthCheckManager {
     */
   def statuses(appId: AbsolutePathId): Future[Map[Instance.Id, Seq[Health]]]
 
-  def enableShield(taskId: Task.Id, duration: FiniteDuration): Unit
+  def enableShield(taskId: Task.Id, duration: FiniteDuration): Future[Done]
 
-  def disableShield(taskId: Task.Id): Unit
+  def disableShield(taskId: Task.Id): Future[Done]
 
-  def listShields(): Seq[HealthCheckShield]
+  def listShields(): Future[Seq[HealthCheckShield]]
 }

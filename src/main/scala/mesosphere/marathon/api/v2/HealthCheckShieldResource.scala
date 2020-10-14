@@ -29,8 +29,8 @@ class HealthCheckShieldResource @Inject() (
   @GET
   def index(
     @Context req: HttpServletRequest, @Suspended asyncResponse: AsyncResponse): Unit = sendResponse(asyncResponse) {
-    async{
-      val shields = healthCheckManager.listShields()
+    async {
+      val shields = await (healthCheckManager.listShields())
       ok(Raml.toRaml(shields))
     }
   }
@@ -46,8 +46,8 @@ class HealthCheckShieldResource @Inject() (
       val parsedDuration = Duration(duration)
       if (parsedDuration.isFinite()) {
         val ttl = parsedDuration.asInstanceOf[FiniteDuration]
-        healthCheckManager.enableShield(Task.Id.parse(taskId), ttl)
-        ok (s"Enabled HC for ${taskId} with TTL ${ttl}!")
+        await (healthCheckManager.enableShield(Task.Id.parse(taskId), ttl))
+        ok()
       } else {
         status(Status.BAD_REQUEST)
       }
@@ -61,8 +61,8 @@ class HealthCheckShieldResource @Inject() (
     @Context req: HttpServletRequest, @Suspended asyncResponse: AsyncResponse): Unit = sendResponse(asyncResponse) {
     async {
       implicit val identity = await(authenticatedAsync(req))
-      healthCheckManager.disableShield(Task.Id.parse(taskId))
-      ok(s"Disabled HC for ${taskId}!")
+      await (healthCheckManager.disableShield(Task.Id.parse(taskId)))
+      ok()
     }
   }
 }

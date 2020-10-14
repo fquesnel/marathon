@@ -13,8 +13,6 @@ import mesosphere.marathon.core.event.{AddHealthCheck, RemoveHealthCheck}
 import mesosphere.marathon.core.group.GroupManager
 import mesosphere.marathon.core.health._
 import mesosphere.marathon.core.health.impl.AppHealthCheckActor.ApplicationKey
-import mesosphere.marathon.core.health.impl.HealthCheckShieldManager
-import mesosphere.marathon.core.health.HealthCheckShield
 import mesosphere.marathon.core.health.impl.HealthCheckActor.{AppHealth, GetAppHealth, GetInstanceHealth}
 import mesosphere.marathon.core.instance.Instance
 import mesosphere.marathon.core.task.Task
@@ -38,7 +36,8 @@ class MarathonHealthCheckManager(
     eventBus: EventStream,
     instanceTracker: InstanceTracker,
     groupManager: GroupManager,
-    conf: MarathonConf)(implicit mat: ActorMaterializer) extends HealthCheckManager with StrictLogging {
+    conf: MarathonConf,
+    healthCheckShieldManager: HealthCheckShieldManager)(implicit mat: ActorMaterializer) extends HealthCheckManager with StrictLogging {
 
   protected[this] case class ActiveHealthCheck(
       healthCheck: HealthCheck,
@@ -48,8 +47,6 @@ class MarathonHealthCheckManager(
     RWLock(mutable.Map.empty.withDefaultValue(Map.empty.withDefaultValue(Set.empty)))
 
   protected[this] var appHealthChecksActor: ActorRef = actorRefFactory.actorOf(AppHealthCheckActor.props(eventBus))
-
-  private[this] val healthCheckShieldManager: HealthCheckShieldManager = new HealthCheckShieldManager()
 
   override def list(appId: AbsolutePathId): Set[HealthCheck] =
     listActive(appId).map(_.healthCheck)
@@ -90,15 +87,15 @@ class MarathonHealthCheckManager(
       ahcs(appId)(appVersion)
     }
 
-  override def enableShield(taskId: Task.Id, duration: FiniteDuration): Unit = {
+  override def enableShield(taskId: Task.Id, duration: FiniteDuration): Future[Done] = {
     healthCheckShieldManager.enableShield(taskId, duration)
   }
 
-  override def disableShield(taskId: Task.Id): Unit = {
+  override def disableShield(taskId: Task.Id): Future[Done] = {
     healthCheckShieldManager.disableShield(taskId)
   }
 
-  override def listShields(): Seq[HealthCheckShield] = {
+  override def listShields(): Future[Seq[HealthCheckShield]] = {
     healthCheckShieldManager.getShields()
   }
 

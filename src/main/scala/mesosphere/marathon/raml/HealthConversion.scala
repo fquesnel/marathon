@@ -18,7 +18,7 @@ trait HealthConversion extends DefaultConversions {
   implicit val healthCheckShieldRamlWriter: Writes[core.health.HealthCheckShield, HealthCheckShield] = Writes { hcs =>
     HealthCheckShield(
       taskId = hcs.taskId.idString,
-      ttl = hcs.ttl.toRaml
+      until = hcs.until.toRaml
     )
   }
 }
