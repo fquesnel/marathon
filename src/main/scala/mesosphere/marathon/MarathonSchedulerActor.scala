@@ -59,7 +59,7 @@ class MarathonSchedulerActor private (
     * Since multiple conflicting deployment can be handled at the same time lockedRunSpecs saves
     * the lock count for each affected PathId. Lock is removed if lock count == 0.
     */
-  val lockedRunSpecs = collection.mutable.Map.empty[AbsolutePathId, Long]
+  val lockedRunSpecs = collection.mutable.Map.empty[AbsolutePathId, Map[Long, String]]
   var historyActor: ActorRef = _
   var activeReconciliation: Option[Future[Status]] = None
   var electionEventsSubscription: Option[Cancellable] = None
@@ -213,7 +213,7 @@ class MarathonSchedulerActor private (
     // there's no need for synchronization here, because this is being
     // executed inside an actor, i.e. single threaded
     if (noConflictsWith(runSpecIds)) {
-      val lockVersion = addLocks(runSpecIds)
+      val lockVersion = addLocks(runSpecIds, s"simple scale runSpec check for ${runSpecIds}")
       Some(f(lockVersion))
     } else {
       logger.info(s"Run specs are locked: ids=[${runSpecIds.mkString(", ")}] lockedRunSpecs=$lockedRunSpecs")
@@ -233,10 +233,12 @@ class MarathonSchedulerActor private (
     // app /foo after another. The first scale check locks with version 1. The seconds will lock
     // with version 2 after the lock for v1 was released. This check will then prevent that a delayed
     // duplicated lock release for v1 will release v2.
-    if (lockedRunSpecs.get(runSpecId).contains(lockVersion)) {
+    val lock = lockedRunSpecs.get(runSpecId).getOrElse(Map(lockVersion + 1 -> "Not found"))
+    if (lock.head._1 == lockVersion) {
+      val reason = lock.head._2
       lockedRunSpecs.remove(runSpecId)
-      logger.debug(
-        s"Removed lock for run spec: id=$runSpecId lockedRunSpecs=$lockedRunSpecs lockVersion=$lockVersion"
+      logger.info(
+        s"Removed lock for run spec: id=$runSpecId lockedRunSpecs=$lockedRunSpecs reason=${reason} lockVersion=$lockVersion"
       )
     } else {
       logger.warn(
@@ -249,15 +251,20 @@ class MarathonSchedulerActor private (
     currentLockVersion += 1
     currentLockVersion
   }
-  def addLocks(runSpecIds: Set[AbsolutePathId]): Long = {
+  def addLocks(runSpecIds: Set[AbsolutePathId], reason: String): Long = {
     val lockVersion = getNextLockVersion()
-    runSpecIds.foreach { id => addLock(id, lockVersion) }
+    runSpecIds.foreach { id => addLock(id, lockVersion, reason) }
     lockVersion
   }
 
-  def addLock(runSpecId: AbsolutePathId, lockVersion: Long): Unit = {
-    lockedRunSpecs(runSpecId) = lockVersion
-    logger.debug(s"Added to lock for run spec: id=$runSpecId locks=${lockedRunSpecs(runSpecId)} lockedRunSpec=$lockedRunSpecs")
+  def addLock(runSpecId: AbsolutePathId, lockVersion: Long, reason: String): Unit = {
+    if (lockedRunSpecs.get(runSpecId).getOrElse(Map(lockVersion + 1 -> "No reason")).head._1 == lockVersion) {
+      lockedRunSpecs(runSpecId) = Map(lockVersion -> reason)
+      logger.warn(s"Replaced lock for run spec: id=$runSpecId locks=${lockedRunSpecs(runSpecId)} lockedRunSpec=$lockedRunSpecs")
+    } else {
+      lockedRunSpecs(runSpecId) = Map(lockVersion -> reason)
+      logger.info(s"Added to lock for run spec: id=$runSpecId locks=${lockedRunSpecs(runSpecId)} lockedRunSpec=$lockedRunSpecs")
+    }
   }
 
   def driver: SchedulerDriver = marathonSchedulerDriverHolder.driver.get
@@ -276,7 +283,7 @@ class MarathonSchedulerActor private (
     // - the old deployment will be cancelled and release all claimed locks
     //
     // In the case of a DeploymentFinished or DeploymentFailed we lower the lock again. See the receiving methods
-    val lockVersion = addLocks(runSpecIds)
+    val lockVersion = addLocks(runSpecIds, s"deployment for spec ${runSpecIds} : ${cmd.plan.id}")
 
     deploymentManager.start(plan, cmd.force, origSender).onComplete {
       case Success(_) =>
