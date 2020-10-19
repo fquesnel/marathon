@@ -26,9 +26,9 @@ class HealthModule(
     conf: MarathonConf,
     healthCheckShieldRepository: HealthCheckShieldRepository,
     leadershipModule: LeadershipModule)(implicit mat: ActorMaterializer, ec: ExecutionContext) {
-  private val healthCheckShieldManager = new HealthCheckShieldManager(healthCheckShieldRepository)
+  private val healthCheckShieldManager = new HealthCheckShieldManager(healthCheckShieldRepository, conf)
   private val healthCheckShieldActor = leadershipModule.startWhenLeader(
-    HealthCheckShieldActor.props(healthCheckShieldManager),
+    HealthCheckShieldActor.props(healthCheckShieldManager, conf),
     "HealthCheckShieldActor")
 
   lazy val healthCheckManager = new MarathonHealthCheckManager(

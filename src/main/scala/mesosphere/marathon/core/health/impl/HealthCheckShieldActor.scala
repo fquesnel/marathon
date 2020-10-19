@@ -3,6 +3,7 @@ package core.health.impl
 
 import com.typesafe.scalalogging.StrictLogging
 import mesosphere.marathon.core.health.impl.HealthCheckShieldActor._
+import mesosphere.marathon.core.health.HealthCheckShieldConf
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
@@ -15,24 +16,29 @@ import akka.{Done}
 // 1. Detect the leadership change, so that the cache in HealthCheckShieldManager is updated when we become a leader
 // 2. Schedule a periodical purge of the expired health check shields
 private[health] class HealthCheckShieldActor(
-    manager: HealthCheckShieldManager
+    manager: HealthCheckShieldManager,
+    conf: HealthCheckShieldConf
 ) extends Actor with Timers with StrictLogging {
   var lastPurge: Future[Done] = Future.successful(Done)
 
   override def preStart() = {
-    val cacheInitFuture = manager.fillCacheFromStorage()
-    // There's no way in Marathon codebase to wait for asynchronous preload
-    // By blocking, we give the future at least some time to populate the cache
-    Await.result(cacheInitFuture, atMost = 5.seconds)
-    // Trigger the first purge immediately, then purge periodically
-    self ! Purge
-    schedulePurge()
+    if (conf.healthCheckShieldFeatureEnabled) {
+      val cacheInitFuture = manager.fillCacheFromStorage()
+      // There's no way in Marathon codebase to wait for asynchronous preload
+      // By blocking, we give the future at least some time to populate the cache
+      Await.result(cacheInitFuture, atMost = 5.seconds)
+      // Trigger the first purge immediately, then purge periodically
+      self ! Purge
+      schedulePurge()
+    } else {
+      logger.info("[health-check-shield] Health check shield feature is disabled")
+    }
   }
 
   def schedulePurge() = {
-    val purgeInterval = 5.minutes
+    val purgeInterval = conf.healthCheckShieldPurgePeriod
     timers.startPeriodicTimer(TimerKey, Purge, purgeInterval)
-    logger.info("[health-check-shield] Scheduled periodical purge")
+    logger.info(s"[health-check-shield] Scheduled periodical purge with period ${purgeInterval}")
   }
 
   def receive: Receive = {
@@ -48,6 +54,6 @@ object HealthCheckShieldActor {
   case class TimerKey()
   case class Purge()
 
-  def props(manager: HealthCheckShieldManager): Props =
-    Props(new HealthCheckShieldActor(manager))
+  def props(manager: HealthCheckShieldManager, conf: HealthCheckShieldConf): Props =
+    Props(new HealthCheckShieldActor(manager, conf))
 }

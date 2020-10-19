@@ -16,6 +16,9 @@ description: |
           application/json:
             type: healthCheck.HealthCheckShield[]
             example: !include examples/health-check-shield-get.json
+      503:
+        description: |
+          Health check shield API is disabled.
 
 /{taskId}:
   description: |
@@ -46,6 +49,9 @@ description: |
       200:
         description: |
           The shield was successfully created or updated.
+      503:
+        description: |
+          Health check shield API is disabled.
 
   delete:
     description: |
@@ -56,3 +62,6 @@ description: |
       200:
         description: |
           The shield was deleted successfully.
+      503:
+        description: |
+          Health check shield API is disabled.
