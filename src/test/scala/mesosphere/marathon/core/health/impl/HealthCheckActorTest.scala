@@ -8,7 +8,7 @@ import akka.stream.scaladsl.{MergeHub, Sink}
 import akka.testkit._
 import mesosphere.AkkaUnitTest
 import mesosphere.marathon.core.health.impl.AppHealthCheckActor.PurgeHealthCheckStatuses
-import mesosphere.marathon.core.health.{Health, HealthCheck, Healthy, MarathonHealthCheck, MarathonHttpHealthCheck, PortReference}
+import mesosphere.marathon.core.health.{HealthCheckShieldConf, Health, HealthCheck, Healthy, MarathonHealthCheck, MarathonHttpHealthCheck, PortReference}
 import mesosphere.marathon.core.instance.{Instance, TestInstanceBuilder}
 import mesosphere.marathon.core.task.Task
 import mesosphere.marathon.core.task.termination.{KillReason, KillService}
@@ -53,7 +53,8 @@ class HealthCheckActorTest extends AkkaUnitTest {
         .run()
 
     val healthCheckShieldRepository = mock[HealthCheckShieldRepository]
-    val healthCheckShieldManager = new HealthCheckShieldManager(healthCheckShieldRepository)
+    val healthCheckShieldConf = mock[HealthCheckShieldConf]
+    val healthCheckShieldManager = new HealthCheckShieldManager(healthCheckShieldRepository, healthCheckShieldConf)
 
     def runningInstance(): Instance = {
       TestInstanceBuilder.newBuilder(appId).addTaskRunning().getInstance()
