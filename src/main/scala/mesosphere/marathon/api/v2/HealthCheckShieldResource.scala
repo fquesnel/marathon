@@ -54,20 +54,22 @@ class HealthCheckShieldResource @Inject() (
     @Context req: HttpServletRequest, @Suspended asyncResponse: AsyncResponse): Unit = sendResponse(asyncResponse) {
     async {
       if (config.healthCheckShieldFeatureEnabled) {
-        implicit val identity = await(authenticatedAsync(req))
         val parsedTaskId = Task.Id.parse(taskId)
         val maybeRunSpec = groupManager.runSpec(parsedTaskId.runSpecId)
 
         if (maybeRunSpec.isDefined) {
-          checkAuthorization(UpdateRunSpec, maybeRunSpec.get)
+          implicit val identity = await(authenticatedAsync(req))
+          if (config.healthCheckShieldAuthorizationEnabled) {
+            checkAuthorization(UpdateRunSpec, maybeRunSpec.get)
+          }
+
           val parsedDuration = Duration(duration)
-          if (parsedDuration.isFinite()) {
+          if (parsedDuration.isFinite() && parsedDuration < config.healthCheckShieldMaxDuration) {
             val ttl = parsedDuration.asInstanceOf[FiniteDuration]
-            logger.info(s"[health-check-shield] ${identity} shields ${parsedTaskId} for ${ttl}")
             await (healthCheckManager.enableShield(parsedTaskId, ttl))
             ok()
           } else {
-            status(Status.BAD_REQUEST)
+            Response.status(Status.BAD_REQUEST).entity(new RestStreamingBody(raml.Error(s"The duration should be finite and less than ${config.healthCheckShieldMaxDuration.toMinutes} minutes"))).build()
           }
         } else {
           unknownApp(parsedTaskId.runSpecId)
@@ -85,17 +87,16 @@ class HealthCheckShieldResource @Inject() (
     @Context req: HttpServletRequest, @Suspended asyncResponse: AsyncResponse): Unit = sendResponse(asyncResponse) {
     async {
       if (config.healthCheckShieldFeatureEnabled) {
-        implicit val identity = await(authenticatedAsync(req))
         val parsedTaskId = Task.Id.parse(taskId)
-        val maybeRunSpec = groupManager.runSpec(parsedTaskId.runSpecId)
 
         // We should be able to delete the shield with the API even after the app and its runspec are deleted
-        // As we can't authorize something that doesn't exist, delete of unexistent app is allowed after authentication
-        if (maybeRunSpec.isDefined) {
+        // As we can't authorize something that doesn't exist, delete the shield of unexistent app is allowed after authentication
+        val maybeRunSpec = groupManager.runSpec(parsedTaskId.runSpecId)
+        implicit val identity = await(authenticatedAsync(req))
+        if (maybeRunSpec.isDefined && config.healthCheckShieldAuthorizationEnabled) {
           checkAuthorization(UpdateRunSpec, maybeRunSpec.get)
         }
 
-        logger.info(s"[health-check-shield] ${identity} disables shield of ${parsedTaskId}")
         await (healthCheckManager.disableShield(parsedTaskId))
         ok()
       } else {
@@ -105,6 +106,6 @@ class HealthCheckShieldResource @Inject() (
   }
 
   def featureDisabledError(): Response = {
-    Response.status(Status.INTERNAL_SERVER_ERROR).entity(new RestStreamingBody(raml.Error("HealthCheckShield feature is disabled"))).build()
+    Response.status(Status.FORBIDDEN).entity(new RestStreamingBody(raml.Error("HealthCheckShield feature is disabled in Marathon config"))).build()
   }
 }

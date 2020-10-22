@@ -23,6 +23,24 @@ trait HealthCheckShieldConf extends ScallopConf {
     noshort = true
   )
 
+  private[this] lazy val _healthCheckShieldAuthorizationEnabled = toggle(
+    "health_check_shield_authorization",
+    default = Some(false),
+    descrYes = "Updating and deleting of the health check shields require UpdateRunSpec permission",
+    descrNo = "(Default) Only authentication is required to use the health check shields",
+    prefix = "disable_",
+    noshort = true
+  )
+
+  private[this] lazy val _healthCheckShieldMaxDuration = opt[Long](
+    "health_check_shield_max_duration",
+    default = Some(3.days.toMillis),
+    descr = "The longest allowed duration of the health check shielding, in milliseconds",
+    noshort = true
+  )
+
   lazy val healthCheckShieldFeatureEnabled: Boolean = _healthCheckShieldFeatureEnabled()
   lazy val healthCheckShieldPurgePeriod: FiniteDuration = _healthCheckShieldPurgePeriod().millis
+  lazy val healthCheckShieldAuthorizationEnabled: Boolean = _healthCheckShieldAuthorizationEnabled()
+  lazy val healthCheckShieldMaxDuration: FiniteDuration = _healthCheckShieldMaxDuration().millis
 }

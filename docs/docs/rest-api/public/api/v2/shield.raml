@@ -16,7 +16,7 @@ description: |
           application/json:
             type: healthCheck.HealthCheckShield[]
             example: !include examples/health-check-shield-get.json
-      503:
+      403:
         description: |
           Health check shield API is disabled.
 
@@ -49,9 +49,15 @@ description: |
       200:
         description: |
           The shield was successfully created or updated.
-      503:
+      400:
         description: |
-          Health check shield API is disabled.
+          The duration is larger than configured maximum.
+      403:
+        description: |
+          Rights are not sufficient or the health check shield API is disabled.
+      404:
+        description: |
+          The task id points to the non-existent application.
 
   delete:
     description: |
@@ -62,6 +68,6 @@ description: |
       200:
         description: |
           The shield was deleted successfully.
-      503:
+      403:
         description: |
-          Health check shield API is disabled.
+          Rights are not sufficient or the health check shield API is disabled.
