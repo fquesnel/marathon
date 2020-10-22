@@ -216,7 +216,7 @@ class MarathonSchedulerActor private (
       val lockVersion = addLocks(runSpecIds, s"simple scale runSpec check for ${runSpecIds}")
       Some(f(lockVersion))
     } else {
-      logger.info(s"Run specs are locked: ids=[${runSpecIds.mkString(", ")}] lockedRunSpecs=$lockedRunSpecs")
+      logger.info(s"Run specs are locked: ids=[${runSpecIds.mkString(", ")}] lockedRunSpecs=${showLockedRunSpecs}")
       None
     }
   }
@@ -224,6 +224,10 @@ class MarathonSchedulerActor private (
   def noConflictsWith(runSpecIds: Set[AbsolutePathId]): Boolean = {
     val conflicts = lockedRunSpecs.keySet intersect runSpecIds
     conflicts.isEmpty
+  }
+
+  def showLockedRunSpecs: String = {
+    lockedRunSpecs.map(lock => f"App ${lock._1} has following lock versions: ${lock._2.keySet.head}").mkString("\n")
   }
 
   def removeLocks(runSpecIds: Iterable[AbsolutePathId], lockVersion: Long): Unit =
@@ -238,13 +242,14 @@ class MarathonSchedulerActor private (
       val reason = lock.head._2
       lockedRunSpecs.remove(runSpecId)
       logger.info(
-        s"Removed lock for run spec: id=$runSpecId lockedRunSpecs=$lockedRunSpecs reason=${reason} lockVersion=$lockVersion"
+        s"Removed lock for run spec: id=$runSpecId reason=${reason} lockVersion=$lockVersion"
       )
     } else {
       logger.warn(
-        s"Cannot release lock for run spec: id=$runSpecId lockedRunSpec=$lockedRunSpecs lockVersion=$lockVersion"
+        s"Cannot release lock for run spec: id=$runSpecId lockVersion=$lockVersion"
       )
     }
+    logger.info(f"LockedRunSpecs ${showLockedRunSpecs}")
   }
 
   def getNextLockVersion(): Long = {
@@ -258,13 +263,15 @@ class MarathonSchedulerActor private (
   }
 
   def addLock(runSpecId: AbsolutePathId, lockVersion: Long, reason: String): Unit = {
-    if (lockedRunSpecs.get(runSpecId).getOrElse(Map(lockVersion + 1 -> "No reason")).head._1 == lockVersion) {
+    val lock = lockedRunSpecs.get(runSpecId)
+    if (lock.isDefined) {
+      logger.warn(s"Replaced lock for run spec: id=$runSpecId old_lock=${lockedRunSpecs(runSpecId)} new_lock_version=${lockVersion} new_lock_reason=${reason}")
       lockedRunSpecs(runSpecId) = Map(lockVersion -> reason)
-      logger.warn(s"Replaced lock for run spec: id=$runSpecId locks=${lockedRunSpecs(runSpecId)} lockedRunSpec=$lockedRunSpecs")
     } else {
       lockedRunSpecs(runSpecId) = Map(lockVersion -> reason)
-      logger.info(s"Added to lock for run spec: id=$runSpecId locks=${lockedRunSpecs(runSpecId)} lockedRunSpec=$lockedRunSpecs")
+      logger.info(s"Added to lock for run spec: id=$runSpecId locks=${lockedRunSpecs(runSpecId)}")
     }
+    logger.info(f"LockedRunSpecs ${showLockedRunSpecs}")
   }
 
   def driver: SchedulerDriver = marathonSchedulerDriverHolder.driver.get
@@ -453,8 +460,13 @@ class SchedulerActions(
         if (i.hasReservation) instanceTracker.setGoal(i.instanceId, Goal.Stopped, GoalChangeReason.OverCapacity)
         else instanceTracker.setGoal(i.instanceId, Goal.Decommissioned, GoalChangeReason.OverCapacity)
       }
+      logger.info(f"Scale check waiting for all changeGoalsFuture to finish for ${runSpec.id}")
       await(Future.sequence(changeGoalsFuture))
+
+      logger.info(f"all changeGoals finished. Scale check waiting for instancesAreTerminal to finish for ${runSpec.id}")
       await(instancesAreTerminal)
+
+      logger.info(f"Both futures ended for ${runSpec.id} !")
 
       Done
     }
